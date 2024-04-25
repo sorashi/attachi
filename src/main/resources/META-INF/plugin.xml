@@ -29,7 +29,8 @@
     <actions>
         <action id="io.github.sorashi.attachi.attachi.AttachMultipleAction"
                 class="io.github.sorashi.attachi.attachi.AttachMultipleAction" text="Attach Multiple"
-                description="Attaches the debugger to multiple processes at once">
+                description="Attaches the debugger to multiple processes at once"
+                icon="com.intellij.icons.ExpUiIcons.Run.AttachToProcess">
             <add-to-group group-id="RunMenu" anchor="first"/>
         </action>
     </actions>
