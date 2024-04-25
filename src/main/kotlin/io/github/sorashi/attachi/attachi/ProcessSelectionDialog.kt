@@ -36,7 +36,7 @@ class ProcessTableModel : AbstractTableModel() {
 
     fun addRow(process: ProcessAndDebuggers) {
         processes.add(process)
-        fireTableDataChanged()
+        fireTableRowsInserted(processes.size - 1, processes.size - 1)
     }
 
     operator fun get(i: Int): ProcessAndDebuggers {
@@ -44,8 +44,11 @@ class ProcessTableModel : AbstractTableModel() {
     }
 
     fun clear() {
+        val size = processes.size
         processes.clear()
-        fireTableDataChanged()
+        if (size > 0) {
+            fireTableRowsDeleted(0, size - 1)
+        }
     }
 
     override fun getColumnCount(): Int {
