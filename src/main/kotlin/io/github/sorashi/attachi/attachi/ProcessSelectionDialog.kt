@@ -3,52 +3,160 @@ package io.github.sorashi.attachi.attachi
 import com.intellij.execution.process.ProcessInfo
 import com.intellij.execution.process.impl.ProcessListUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.ui.ListSpeedSearch
-import com.intellij.ui.components.JBList
+import com.intellij.openapi.util.UserDataHolderBase
+import com.intellij.ui.TableSpeedSearch
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.table.JBTable
+import com.intellij.xdebugger.attach.LocalAttachHost
+import com.intellij.xdebugger.attach.XAttachDebugger
+import com.intellij.xdebugger.attach.XAttachDebuggerProvider
 import java.awt.BorderLayout
-import java.awt.Component
 import javax.swing.*
+import javax.swing.table.AbstractTableModel
 
-class ProcessSelectionDialog(private val project: Project) : DialogWrapper(true) {
-    var selectionList: JBList<ProcessInfo>
-    init {
-        title = "Attach Multiple"
-        selectionList = JBList()
-        init()
-    }
-    override fun createCenterPanel(): JComponent? {
-        val pnl = JPanel(BorderLayout())
-        val lmodel = DefaultListModel<ProcessInfo>()
-        val pcs = ProcessListUtil.getProcessList()
-        pcs.sortBy { it.executableName }
-        for (pc in pcs) {
-            lmodel.addElement(pc);
+enum class DebuggerFilter {
+    All,
+    DotNet,
+    LLDB;
+
+    override fun toString(): String {
+        return when (this) {
+            All -> "All"
+            DotNet -> ".NET"
+            LLDB -> "LLDB"
         }
-        ListSpeedSearch.installOn(selectionList)
-
-        selectionList.model = lmodel
-        selectionList.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
-        selectionList.isVisible = true
-        selectionList.cellRenderer = ProcessInfoCellRenderer()
-
-        val scrollPane = JBScrollPane(selectionList)
-        pnl.add(scrollPane, BorderLayout.CENTER)
-        return pnl
     }
 }
 
-class ProcessInfoCellRenderer  : DefaultListCellRenderer() {
-    override fun getListCellRendererComponent(
-        list: JList<*>?,
-        value: Any?,
-        index: Int,
-        isSelected: Boolean,
-        cellHasFocus: Boolean
-    ): Component {
-        super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-        text = (value as ProcessInfo).executableName
-        return this
+class ProcessTableModel : AbstractTableModel() {
+    private val processes = mutableListOf<ProcessAndDebuggers>()
+    override fun getRowCount(): Int = processes.size
+
+    fun addRow(process: ProcessAndDebuggers) {
+        processes.add(process)
+        fireTableDataChanged()
+    }
+
+    operator fun get(i: Int): ProcessAndDebuggers {
+        return processes[i]
+    }
+
+    fun clear() {
+        processes.clear()
+        fireTableDataChanged()
+    }
+
+    override fun getColumnCount(): Int {
+        return 3
+    }
+
+    override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
+        val p = processes[rowIndex]
+        return when (columnIndex) {
+            0 -> p.process.executableDisplayName
+            1 -> p.process.pid
+            2 -> p.process.args
+            else -> p
+        }
+    }
+
+    override fun getColumnName(column: Int): String {
+        return when (column) {
+            0 -> "Name"
+            1 -> "PID"
+            2 -> "Arguments"
+            else -> throw Exception()
+        }
+    }
+
+    override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = false
+}
+
+data class ProcessAndDebuggers(val process: ProcessInfo, val debuggers: List<XAttachDebugger>) {
+    companion object {
+        fun get(project: Project): MutableList<ProcessAndDebuggers> {
+            val attachHost = LocalAttachHost.INSTANCE
+            val dataHolder = UserDataHolderBase()
+            val plist = ProcessListUtil.getProcessList().map { p ->
+                val debuggers =
+                    XAttachDebuggerProvider.EP.extensionList.filter { it.isAttachHostApplicable(attachHost) }
+                        .flatMap { it.getAvailableDebuggers(project, attachHost, p, dataHolder) }
+                ProcessAndDebuggers(p, debuggers)
+            }.toMutableList()
+            return plist
+        }
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this.javaClass != other.javaClass) return false
+        return this.process == other
+    }
+
+    override fun hashCode(): Int {
+        return process.hashCode()
+    }
+}
+
+class ProcessSelectionDialog(private val project: Project) : DialogWrapper(true) {
+    private val tableModel: ProcessTableModel = ProcessTableModel()
+    private val table: JBTable
+    private val combo: ComboBox<DebuggerFilter>
+
+    init {
+        title = "Attach Multiple"
+        combo = ComboBox<DebuggerFilter>()
+        combo.addItem(DebuggerFilter.All)
+        combo.addItem(DebuggerFilter.DotNet)
+        combo.addItem(DebuggerFilter.LLDB)
+        combo.selectedItem = DebuggerFilter.DotNet
+        combo.addItemListener { _ -> repopulateTable() }
+        table = JBTable(tableModel)
+        // disable table editing
+        table.setDefaultEditor(Object::class.java, null)
+        table.selectionModel.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+        table.autoCreateRowSorter = true
+        table.rowSorter.sortKeys = listOf(RowSorter.SortKey(0, SortOrder.ASCENDING))
+        TableSpeedSearch.installOn(table) // optionally specify a to-string converter { a -> a.toString() }
+        setSize(800, 600)
+        init()
+    }
+
+    private fun repopulateTable() {
+        // clear the table
+        tableModel.clear()
+
+        val pcs = ProcessAndDebuggers.get(project).filter { pnd ->
+            when (combo.selectedItem as DebuggerFilter) {
+                DebuggerFilter.All -> pnd.debuggers.isNotEmpty()
+                DebuggerFilter.DotNet -> pnd.debuggers.any { it.debuggerDisplayName == ".NET Debugger" }
+                DebuggerFilter.LLDB -> pnd.debuggers.any { it.debuggerDisplayName == "LLDB" }
+            }
+        }
+        for (pc in pcs) {
+            tableModel.addRow(pc)
+        }
+    }
+
+    fun getSelectedItems(): List<ProcessAndDebuggers> {
+        val list = mutableListOf<ProcessAndDebuggers>()
+        for (i in table.selectedRows) {
+            val actual = table.convertRowIndexToModel(i)
+            list.add(tableModel[actual])
+        }
+        return list
+    }
+
+    override fun createCenterPanel(): JComponent {
+        val pnl = JPanel(BorderLayout())
+
+        repopulateTable()
+
+        val scrollPane = JBScrollPane(table)
+        pnl.add(scrollPane, BorderLayout.CENTER)
+        pnl.add(combo, BorderLayout.NORTH)
+        return pnl
     }
 }
