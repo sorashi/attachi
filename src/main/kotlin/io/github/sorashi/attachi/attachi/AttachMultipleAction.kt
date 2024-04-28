@@ -118,6 +118,9 @@ class AttachMultipleAction : AnAction() {
                         onThreadEndedListener.invoke()
                         return@Thread
                     }
+                    if (dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid } || token.isCancellationRequested()) {
+                        continue
+                    }
                     debugger.attachDebugSession(project, attachHost, p.process)
                     // active waiting for the debugger to attach, because it ignores other attach commands while attaching to process
                     while (!dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid } && !token.isCancellationRequested()) {
