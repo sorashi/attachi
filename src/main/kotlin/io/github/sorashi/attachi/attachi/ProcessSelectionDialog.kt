@@ -2,6 +2,7 @@ package io.github.sorashi.attachi.attachi
 
 import com.intellij.execution.process.ProcessInfo
 import com.intellij.execution.process.impl.ProcessListUtil
+import com.intellij.icons.ExpUiIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -14,6 +15,7 @@ import com.intellij.xdebugger.attach.LocalAttachHost
 import com.intellij.xdebugger.attach.XAttachDebugger
 import com.intellij.xdebugger.attach.XAttachDebuggerProvider
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
 
@@ -161,16 +163,19 @@ class ProcessSelectionDialog(private val project: Project) : DialogWrapper(true)
         val scrollPane = JBScrollPane(table)
         pnl.add(scrollPane, BorderLayout.CENTER)
         pnl.add(combo, BorderLayout.NORTH)
+        val frame = JPanel()
+        frame.layout = FlowLayout()
+        val refreshButton = JButton("Refresh", ExpUiIcons.General.Refresh)
+        refreshButton.addActionListener { _ -> repopulateTable() }
+        frame.add(refreshButton)
         ProjectAttachingSessionManager.addOnCompletionHandler(project) {
             this.isOKActionEnabled = true
         }
         if (ProjectAttachingSessionManager.isActive(project)) {
             this.isOKActionEnabled = false
-            pnl.add(
-                JBLabel("An attaching session is in progress. Let it end first.", SwingConstants.LEFT),
-                BorderLayout.SOUTH
-            )
+            frame.add(JBLabel("An attaching session is in progress. Let it end first.", SwingConstants.LEFT))
         }
+        pnl.add(frame, BorderLayout.SOUTH)
         return pnl
     }
 }
