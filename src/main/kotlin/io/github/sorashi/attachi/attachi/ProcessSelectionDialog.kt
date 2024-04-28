@@ -13,7 +13,6 @@ import com.intellij.ui.table.JBTable
 import com.intellij.xdebugger.attach.LocalAttachHost
 import com.intellij.xdebugger.attach.XAttachDebugger
 import com.intellij.xdebugger.attach.XAttachDebuggerProvider
-import org.intellij.lang.annotations.JdkConstants.HorizontalAlignment
 import java.awt.BorderLayout
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
@@ -162,10 +161,10 @@ class ProcessSelectionDialog(private val project: Project) : DialogWrapper(true)
         val scrollPane = JBScrollPane(table)
         pnl.add(scrollPane, BorderLayout.CENTER)
         pnl.add(combo, BorderLayout.NORTH)
-        ProjectAttachingSessionManager.addOnThreadEndedHandler(project) {
+        ProjectAttachingSessionManager.addOnCompletionHandler(project) {
             this.isOKActionEnabled = true
         }
-        if (ProjectAttachingSessionManager.isThreadAlive(project)) {
+        if (ProjectAttachingSessionManager.isActive(project)) {
             this.isOKActionEnabled = false
             pnl.add(
                 JBLabel("An attaching session is in progress. Let it end first.", SwingConstants.LEFT),

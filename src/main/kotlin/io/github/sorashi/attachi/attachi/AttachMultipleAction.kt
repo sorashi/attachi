@@ -2,65 +2,45 @@ package io.github.sorashi.attachi.attachi
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
+import com.intellij.openapi.progress.checkCancelled
 import com.intellij.openapi.project.Project
+import com.intellij.platform.ide.progress.withBackgroundProgress
+import com.intellij.platform.util.progress.reportSequentialProgress
 import com.intellij.xdebugger.XDebugSession
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.XDebuggerManagerListener
 import com.intellij.xdebugger.attach.LocalAttachHost
 import com.jetbrains.rider.debugger.DotNetDebugProcess
 import com.jetbrains.rider.debugger.util.processIdOrNull
-
-class CancellationToken {
-    private var cancelled = false
-    fun isCancellationRequested(): Boolean = cancelled
-    fun cancel() {
-        cancelled = true
-    }
-}
-
-class AttachingSession(
-    private val cancellationToken: CancellationToken,
-    val thread: Thread,
-    val onThreadEndedListener: ThreadEndedListener
-) {
-    fun cancel() = cancellationToken.cancel()
-    fun isCancelled(): Boolean = cancellationToken.isCancellationRequested()
-    fun isThreadAlive(): Boolean = thread.isAlive
-    fun addOnThreadEndedHandler(onThreadEndedHandler: ThreadEndedHandler) =
-        onThreadEndedListener.addHandler(onThreadEndedHandler)
-}
+import kotlinx.coroutines.*
 
 object ProjectAttachingSessionManager {
-    private val sessions = mutableMapOf<Project, AttachingSession>()
+    private val sessions = mutableMapOf<Project, Job>()
     fun cancel(project: Project) {
-        println("Cancelling attaching session in ${project.name}")
         sessions[project]?.cancel()
+        println("Cancelled attaching session in ${project.name}")
     }
 
-    fun isCancelled(project: Project): Boolean {
-        return sessions[project]?.isCancelled() ?: false
+    fun isActive(project: Project): Boolean {
+        return sessions[project]?.isActive ?: false
     }
 
-    fun isThreadAlive(project: Project): Boolean {
-        return sessions[project]?.isThreadAlive() ?: return false
+    fun addOnCompletionHandler(project: Project, onThreadEndedHandler: () -> Unit) {
+        sessions[project]?.invokeOnCompletion {  onThreadEndedHandler.invoke() }
     }
 
-    fun addOnThreadEndedHandler(project: Project, onThreadEndedHandler: ThreadEndedHandler) {
-        sessions[project]?.addOnThreadEndedHandler(onThreadEndedHandler)
-    }
-
-    fun addAndStart(
+    fun add(
         project: Project,
-        cancellationToken: CancellationToken,
-        thread: Thread,
-        onThreadEndedListener: ThreadEndedListener
+        job: Job
     ) {
-        if (isThreadAlive(project)) {
+        if (isActive(project)) {
             throw Exception("The session is still running")
         }
-        sessions[project] = AttachingSession(cancellationToken, thread, onThreadEndedListener)
-        if (!thread.isAlive) {
-            thread.start()
+        sessions[project] = job
+        if (!job.isActive) {
+            job.start()
         }
     }
 }
@@ -75,21 +55,46 @@ class AttachMultipleActionDebuggerListener(private val project: Project) : XDebu
     }
 }
 
-class ThreadEndedListener {
-    private val handlers = mutableListOf<ThreadEndedHandler>()
-    fun addHandler(handler: ThreadEndedHandler) {
-        handlers.add(handler)
-    }
-
-    fun invoke() {
-        for (handler in handlers) {
-            handler.invoke()
+@Service(Service.Level.PROJECT)
+class DebuggerAttachingService(private val project: Project, private val coroutineScope: CoroutineScope) {
+    fun attach(selectedItems: List<ProcessAndDebuggers>): Job {
+       return coroutineScope.launch {
+            withBackgroundProgress(project, "Attaching to multiple processes") {
+                reportSequentialProgress(selectedItems.size) { reporter ->
+                    val dbm = XDebuggerManager.getInstance(project)
+                    val attachHost = LocalAttachHost.INSTANCE
+                    for (p in selectedItems) {
+                        var debugger = p.debuggers.firstOrNull { it.debuggerDisplayName == ".NET Debugger" }
+                        if (debugger == null) {
+                            debugger = p.debuggers.firstOrNull { it.debuggerDisplayName == "LLDB" }
+                        }
+                        if (debugger == null) {
+                            debugger = p.debuggers.first()
+                        }
+                        try {
+                            reporter.itemStep("Attaching ${p.process.executableDisplayName}")
+                            checkCancelled()
+                            if (dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid }) {
+                                reporter.itemStep()
+                                continue
+                            }
+                            debugger.attachDebugSession(project, attachHost, p.process)
+                            // active waiting for the debugger to attach, because it ignores other attach commands while attaching to process
+                            while (!dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid }) {
+                                delay(100)
+                                checkCancelled()
+                            }
+                            checkCancelled()
+                            println("Attached ${debugger.debuggerDisplayName} to process: ${p.process}")
+                        } catch (e: Exception) {
+                            println("Error attaching ${debugger.debuggerDisplayName} to process: ${p.process.executableDisplayName} (${p.process.pid}): ${e.message}")
+                        }
+                    }
+                }
+            }
         }
     }
 }
-
-typealias ThreadEndedHandler = () -> Unit
-
 
 class AttachMultipleAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
@@ -100,39 +105,7 @@ class AttachMultipleAction : AnAction() {
     }
 
     private fun attachToProcesses(selectedItems: List<ProcessAndDebuggers>, project: Project) {
-        val attachHost = LocalAttachHost.INSTANCE
-        val dbm = XDebuggerManager.getInstance(project)
-        val token = CancellationToken()
-        val onThreadEndedListener = ThreadEndedListener()
-        val thread = Thread {
-            for (p in selectedItems) {
-                var debugger = p.debuggers.firstOrNull { it.debuggerDisplayName == ".NET Debugger" }
-                if (debugger == null) {
-                    debugger = p.debuggers.firstOrNull { it.debuggerDisplayName == "LLDB" }
-                }
-                if (debugger == null) {
-                    debugger = p.debuggers.first()
-                }
-                try {
-                    if (token.isCancellationRequested()) {
-                        onThreadEndedListener.invoke()
-                        return@Thread
-                    }
-                    if (dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid } || token.isCancellationRequested()) {
-                        continue
-                    }
-                    debugger.attachDebugSession(project, attachHost, p.process)
-                    // active waiting for the debugger to attach, because it ignores other attach commands while attaching to process
-                    while (!dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid } && !token.isCancellationRequested()) {
-                        Thread.sleep(100)
-                    }
-                    println("Attached ${debugger.debuggerDisplayName} to process: ${p.process}")
-                } catch (e: Exception) {
-                    println("Error attaching ${debugger.debuggerDisplayName} to process: ${p.process.executableDisplayName} (${p.process.pid}): ${e.message}")
-                }
-            }
-            onThreadEndedListener.invoke()
-        }
-        ProjectAttachingSessionManager.addAndStart(project, token, thread, onThreadEndedListener)
+        val service = project.service<DebuggerAttachingService>()
+        ProjectAttachingSessionManager.add(project, service.attach(selectedItems))
     }
 }
