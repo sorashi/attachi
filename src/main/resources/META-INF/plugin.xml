@@ -34,4 +34,8 @@
             <add-to-group group-id="RunMenu" anchor="first"/>
         </action>
     </actions>
+    <projectListeners>
+        <listener class="io.github.sorashi.attachi.attachi.AttachMultipleActionDebuggerListener"
+                  topic="com.intellij.xdebugger.XDebuggerManagerListener"/>
+    </projectListeners>
 </idea-plugin>
