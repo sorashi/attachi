@@ -4,7 +4,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
-import com.intellij.openapi.progress.checkCancelled
+import com.intellij.openapi.progress.checkCanceled
 import com.intellij.openapi.project.Project
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.platform.util.progress.reportSequentialProgress
@@ -73,7 +73,7 @@ class DebuggerAttachingService(private val project: Project, private val corouti
                         }
                         try {
                             reporter.itemStep("Attaching ${p.process.executableDisplayName}")
-                            checkCancelled()
+                            checkCanceled()
                             if (dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid }) {
                                 reporter.itemStep()
                                 continue
@@ -82,9 +82,9 @@ class DebuggerAttachingService(private val project: Project, private val corouti
                             // active waiting for the debugger to attach, because it ignores other attach commands while attaching to process
                             while (!dbm.debugSessions.any { (it.debugProcess as DotNetDebugProcess).processIdOrNull == p.process.pid }) {
                                 delay(100)
-                                checkCancelled()
+                                checkCanceled()
                             }
-                            checkCancelled()
+                            checkCanceled()
                             println("Attached ${debugger.debuggerDisplayName} to process: ${p.process}")
                         } catch (e: Exception) {
                             println("Error attaching ${debugger.debuggerDisplayName} to process: ${p.process.executableDisplayName} (${p.process.pid}): ${e.message}")
