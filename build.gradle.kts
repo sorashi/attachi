@@ -1,49 +1,60 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.22"
-    id("org.jetbrains.intellij") version "1.17.2"
+    id("org.jetbrains.kotlin.jvm") version "2.1.0"
+    id("org.jetbrains.intellij.platform") version "2.6.0"
 }
 
 group = "io.github.sorashi.attachi"
-version = "0.3.1"
+version = "0.4.0"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
 // Configure Gradle IntelliJ Plugin
-// Read more: https://plugins.jetbrains.com/docs/intellij/tools-gradle-intellij-plugin.html
-intellij {
-    version.set("2024.1.1")
-    type.set("RD") // Target IDE Platform
+// Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
+dependencies {
+    intellijPlatform {
+        create("RD", "2025.1.3")
+        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
 
-    plugins.set(listOf(/* Plugin Dependencies */))
+        // Add necessary plugin dependencies for compilation here, example:
+        // bundledPlugin("com.intellij.java")
+    }
+}
+
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild = "251"
+        }
+
+        changeNotes = """
+            Migrated to Gradle IntelliJ Platform Plugin 2.6.0
+    """.trimIndent()
+    }
 }
 
 tasks {
     // Set the JVM compatibility versions
     withType<JavaCompile> {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
+        sourceCompatibility = "21"
+        targetCompatibility = "21"
     }
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.jvmTarget = "17"
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_21)
     }
-
-    patchPluginXml {
-        sinceBuild.set("241")
-        untilBuild.set("242.*")
-    }
-
     signPlugin {
         privateKeyFile.set(file("./certs/private.pem"))
-        privateKeyFile.set(file("./certs/chain.crt"))
-        // certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
-        // privateKey.set(System.getenv("PRIVATE_KEY"))
+        certificateChainFile.set(file("./certs/chain.crt"))
         password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
     }
-
     publishPlugin {
-        token.set(System.getenv("PUBLISH_TOKEN"))
+        token.set(providers.environmentVariable("PUBLISH_TOKEN"))
     }
 }

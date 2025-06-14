@@ -11,7 +11,6 @@
     <vendor email="prazak.dennis@gmail.com" url="https://sorashi.github.io">sorashi</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
-         Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
     <description><![CDATA[
         Attach the debugger to multiple processes at once in Rider.
@@ -34,7 +33,7 @@
         <action id="io.github.sorashi.attachi.attachi.AttachMultipleAction"
                 class="io.github.sorashi.attachi.attachi.AttachMultipleAction" text="Attach Multiple"
                 description="Attaches the debugger to multiple processes at once"
-                icon="com.intellij.icons.ExpUiIcons.Run.AttachToProcess">
+                icon="AllIcons.Debugger.AttachToProcess">
             <add-to-group group-id="RunMenu" anchor="first"/>
         </action>
     </actions>
